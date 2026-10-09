@@ -1,14 +1,29 @@
 #!/usr/bin/env bash
+set +x
 set -euo pipefail
 
-# This value comes from the repository provider, not pipeline plugin options.
-if [[ ! ${BUILDKITE_ENTIRE_CLONE_URL:-} =~ ^entire://([a-zA-Z0-9-]+\.)*entire\.io/[^[:space:]?\#@]+$ ]]; then
-  echo 'Entire: missing or invalid BUILDKITE_ENTIRE_CLONE_URL; select an Entire repository on an eligible hosted job.' >&2
-  exit 1
+# Reuse an existing installation, including one left by an earlier job.
+export PATH="${PATH}:${HOME}/.local/bin"
+if ! command -v entire >/dev/null || ! command -v git-remote-entire >/dev/null; then
+  echo '--- :package: Installing Entire 0.11.4'
+  "$(dirname "${BASH_SOURCE[0]}")/../lib/install"
+  export PATH="${HOME}/.local/bin:${PATH}"
 fi
 
-echo '--- :package: Installing Entire 0.11.4'
-BUILDKITE_ENTIRE_INSTALL_DIR="$("$(dirname "${BASH_SOURCE[0]}")/../lib/install")"
-export BUILDKITE_ENTIRE_INSTALL_DIR
-export PATH="${BUILDKITE_ENTIRE_INSTALL_DIR}/bin:${PATH}"
-export BUILDKITE_REPO="$BUILDKITE_ENTIRE_CLONE_URL"
+# Entire's native remote helper reads ENTIRE_TOKEN, not Git credential helpers.
+# Send the agent credential on stdin so it does not appear in curl's arguments.
+response="$(printf 'Authorization: Token %s\n' "$BUILDKITE_AGENT_ACCESS_TOKEN" \
+  | curl -q --silent --show-error --header @- --request POST \
+    --connect-timeout 15 --max-time 60 \
+    --header 'Content-Type: application/json' \
+    --data "$(jq -cn --arg url "$BUILDKITE_REPO" '{repo_url: $url}')" \
+    --write-out '\n%{http_code}' \
+    "${BUILDKITE_AGENT_ENDPOINT%/}/jobs/${BUILDKITE_JOB_ID}/repository_access_token")"
+if [[ ${response##*$'\n'} != 200 ]]; then
+  echo "Entire: job credential request returned HTTP ${response##*$'\n'}." >&2
+  exit 1
+fi
+ENTIRE_TOKEN="$(printf '%s' "${response%$'\n'*}" \
+  | jq -er '.token | select(type == "string" and length > 0)' 2>/dev/null)"
+export ENTIRE_TOKEN
+unset response

@@ -2,34 +2,17 @@
 set -euo pipefail
 
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
-  echo 'Entire: this plugin supports Linux x86_64 only.' >&2
+  echo 'Entire: automatic installation supports Linux x86_64 only; install Entire on PATH first.' >&2
   exit 1
 fi
-for command in curl tar sha256sum jq git; do
-  if ! command -v "$command" >/dev/null; then
-    echo "Entire: required command not found: $command" >&2
-    exit 1
-  fi
-done
 
-umask 077
-directory="$(mktemp -d "${TMPDIR:-/tmp}/buildkite-entire.XXXXXXXX")"
-trap 'rm -rf -- "$directory"' EXIT
-mkdir "$directory/bin" "$directory/libexec"
-
-# Pin the archive digest in the plugin, rather than trusting a mutable installer
-# or a checksum downloaded alongside potentially replaced release assets.
+archive="$(mktemp)"
+trap 'rm -f -- "$archive"' EXIT
 curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
   --connect-timeout 15 --max-time 180 --retry 2 \
   'https://github.com/entireio/cli/releases/download/v0.11.4/entire_linux_amd64.tar.gz' \
-  --output "$directory/cli.tar.gz"
-printf '%s  %s\n' b93634124bf51bc5e07156d92b53853d124325a3ff9af60c4960307bf8eb870f "$directory/cli.tar.gz" \
+  --output "$archive"
+printf '%s  %s\n' b93634124bf51bc5e07156d92b53853d124325a3ff9af60c4960307bf8eb870f "$archive" \
   | sha256sum --check --status || { echo 'Entire: release checksum mismatch.' >&2; exit 1; }
-tar -xzf "$directory/cli.tar.gz" -C "$directory/libexec" entire git-remote-entire
-mv "$directory/libexec/entire" "$directory/bin/entire"
-cp "$(dirname "${BASH_SOURCE[0]}")/git-remote-entire" "$directory/bin/git-remote-entire"
-chmod 755 "$directory/bin/entire" "$directory/bin/git-remote-entire" "$directory/libexec/git-remote-entire"
-rm "$directory/cli.tar.gz"
-
-trap - EXIT
-printf '%s\n' "$directory"
+mkdir -p "$HOME/.local/bin"
+tar -xzf "$archive" -C "$HOME/.local/bin" entire git-remote-entire
