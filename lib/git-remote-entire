@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Never trace credential acquisition, including when invoked with bash -x.
+set +x
+set -euo pipefail
+
+fail() { echo "Entire: $*" >&2; exit 1; }
+
+# Git passes <remote-name> <url>. Refuse other repositories before requesting a
+# credential. Rails independently checks this URL against the selected repo.
+[[ $# == 2 && -n ${BUILDKITE_ENTIRE_CLONE_URL:-} && $2 == "$BUILDKITE_ENTIRE_CLONE_URL" ]] \
+  || fail 'remote does not match the job Entire repository.'
+[[ -n ${BUILDKITE_JOB_ID:-} && -n ${BUILDKITE_AGENT_ENDPOINT:-} && -n ${BUILDKITE_AGENT_ACCESS_TOKEN:-} ]] \
+  || fail 'job API credentials are missing; run on an eligible Buildkite hosted job.'
+
+# The agent session credential goes to curl over stdin, not argv or a file.
+# Reject curl-config metacharacters rather than interpreting credential text.
+[[ ! $BUILDKITE_AGENT_ACCESS_TOKEN =~ [\"\\[:space:]] ]] \
+  || fail 'invalid agent credential format.'
+request="$(jq -cn --arg url "$BUILDKITE_ENTIRE_CLONE_URL" '{repo_url: $url}')"
+response="$(printf 'header = "Authorization: Token %s"\n' "$BUILDKITE_AGENT_ACCESS_TOKEN" \
+  | curl -q --silent --show-error --config - --request POST \
+    --connect-timeout 15 --max-time 60 \
+    --header 'Content-Type: application/json' --data "$request" \
+    --write-out '\n%{http_code}' \
+    "${BUILDKITE_AGENT_ENDPOINT%/}/jobs/${BUILDKITE_JOB_ID}/repository_access_token")" \
+  || fail 'job credential request failed.'
+
+# Do not follow redirects or print response bodies, including error bodies.
+status="${response##*$'\n'}"
+[[ $status == 200 ]] \
+  || fail "job credential request returned HTTP $status; check hosted-job eligibility, repository selection, and the Entire connection."
+ENTIRE_TOKEN="$(printf '%s' "${response%$'\n'*}" \
+  | jq -er '.token | select(type == "string" and test("^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"))' 2>/dev/null)" \
+  || fail 'job credential response did not contain an Entire JWT.'
+unset response request
+
+# Only this process and its helper child get the token. Nothing is exported by
+# the hook, written to Git config, or saved in a login store. Ignore personal
+# ENTIRE_TOKEN values and disable unsafe TLS/debug settings inherited from jobs.
+unset ENTIRE_DEBUG ENTIRE_TLS_SKIP_VERIFY GIT_TRACE GIT_TRACE_CURL GIT_CURL_VERBOSE
+unset GIT_TRACE_PACKET GIT_TRACE2 GIT_TRACE2_EVENT GIT_TRACE2_PERF GIT_TRACE2_ENV_VARS
+export ENTIRE_TOKEN
+exec "$(dirname "${BASH_SOURCE[0]}")/../libexec/git-remote-entire" "$@"

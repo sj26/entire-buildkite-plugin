@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This value comes from the repository provider, not pipeline plugin options.
+if [[ ! ${BUILDKITE_ENTIRE_CLONE_URL:-} =~ ^entire://([a-zA-Z0-9-]+\.)*entire\.io/[^[:space:]?\#@]+$ ]]; then
+  echo 'Entire: missing or invalid BUILDKITE_ENTIRE_CLONE_URL; select an Entire repository on an eligible hosted job.' >&2
+  exit 1
+fi
+
+echo '--- :package: Installing Entire 0.11.4'
+BUILDKITE_ENTIRE_INSTALL_DIR="$("$(dirname "${BASH_SOURCE[0]}")/../lib/install")"
+export BUILDKITE_ENTIRE_INSTALL_DIR
+export PATH="${BUILDKITE_ENTIRE_INSTALL_DIR}/bin:${PATH}"
+export BUILDKITE_REPO="$BUILDKITE_ENTIRE_CLONE_URL"

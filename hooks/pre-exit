@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Installation is job-private; neither binaries nor auth are cached by the plugin.
+if [[ ${BUILDKITE_ENTIRE_INSTALL_DIR:-} =~ /buildkite-entire\.[[:alnum:]]{8}$ ]]; then
+  rm -rf -- "$BUILDKITE_ENTIRE_INSTALL_DIR"
+fi
+unset BUILDKITE_ENTIRE_INSTALL_DIR

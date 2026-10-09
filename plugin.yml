@@ -1,0 +1,13 @@
+name: Entire
+description: Install Entire and authenticate the agent's checkout with job-issued credentials.
+author: https://github.com/sj26
+requirements:
+  - bash
+  - curl
+  - git
+  - jq
+  - sha256sum
+  - tar
+configuration:
+  additionalProperties: false
+  properties: {}
